@@ -1,0 +1,41 @@
+CXX = g++
+CXXFLAGS = -std=c++17 -Wall -Wextra -O2 `pkg-config --cflags gtk+-3.0`
+LDFLAGS = `pkg-config --libs gtk+-3.0` -pthread
+TARGET_CLI = archlog
+TARGET_GUI = archlog-gui
+SRCS_CLI = src/main.cpp
+SRCS_GUI = src/modern_gui.cpp
+OBJS_CLI = $(SRCS_CLI:.cpp=.o)
+OBJS_GUI = $(SRCS_GUI:.cpp=.o)
+
+.PHONY: all cli gui clean install uninstall
+
+all: cli gui
+
+cli: $(TARGET_CLI)
+
+gui: $(TARGET_GUI)
+
+$(TARGET_CLI): $(OBJS_CLI)
+	$(CXX) $(OBJS_CLI) -o $(TARGET_CLI)
+
+$(TARGET_GUI): $(OBJS_GUI)
+	$(CXX) $(OBJS_GUI) -o $(TARGET_GUI) $(LDFLAGS)
+
+src/main.o: src/main.cpp
+	$(CXX) -std=c++17 -Wall -Wextra -O2 -c $< -o $@
+
+src/gui.o: src/modern_gui.cpp
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+install: all
+	install -Dm755 $(TARGET_CLI) $(DESTDIR)/usr/bin/$(TARGET_CLI)
+	install -Dm755 $(TARGET_GUI) $(DESTDIR)/usr/bin/$(TARGET_GUI)
+	install -Dm644 archlog-gui.desktop $(DESTDIR)/usr/share/applications/archlog-gui.desktop
+
+uninstall:
+	rm -f $(DESTDIR)/usr/bin/$(TARGET_CLI)
+	rm -f $(DESTDIR)/usr/bin/$(TARGET_GUI)
+
+clean:
+	rm -f $(TARGET_CLI) $(TARGET_GUI) $(OBJS_CLI) $(OBJS_GUI)
