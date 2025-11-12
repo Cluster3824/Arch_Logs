@@ -1,9 +1,0 @@
-[Desktop Entry]
-Name=ArchLog GUI
-Comment=Journal Log Analyzer with GUI
-Exec=archlog-gui
-Icon=utilities-log-viewer
-Terminal=false
-Type=Application
-Categories=System;Monitor;
-Keywords=log;journal;systemd;arch;
