@@ -96,13 +96,9 @@ public:
         gtk_window_set_position(GTK_WINDOW(window), GTK_WIN_POS_CENTER);
         gtk_window_set_icon_name(GTK_WINDOW(window), "utilities-system-monitor");
         
-        // Force dark theme
+        // Use default dark theme
         GtkSettings *settings = gtk_settings_get_default();
         g_object_set(settings, "gtk-application-prefer-dark-theme", TRUE, NULL);
-        g_object_set(settings, "gtk-theme-name", "Adwaita-dark", NULL);
-        
-        // Set environment for consistent dark theme
-        setenv("GTK_THEME", "Adwaita:dark", 1);
         g_signal_connect(window, "destroy", G_CALLBACK(gtk_main_quit), NULL);
     }
 
@@ -421,203 +417,12 @@ public:
     }
 
     void apply_system_theme() {
-        bool use_dark_theme = detect_system_dark_mode();
-        GtkCssProvider *provider = gtk_css_provider_new();
-        const char *css = use_dark_theme ? get_dark_theme_css() : get_light_theme_css();
-        gtk_css_provider_load_from_data(provider, css, -1, NULL);
-        gtk_style_context_add_provider_for_screen(gdk_screen_get_default(),
-                                                 GTK_STYLE_PROVIDER(provider),
-                                                 GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
-    }
-    
-    bool detect_system_dark_mode() {
+        // Use default GTK dark theme
         GtkSettings *settings = gtk_settings_get_default();
-        gboolean prefer_dark = FALSE;
-        g_object_get(settings, "gtk-application-prefer-dark-theme", &prefer_dark, NULL);
-        if (prefer_dark) return true;
-        
-        gchar *theme_name = NULL;
-        g_object_get(settings, "gtk-theme-name", &theme_name, NULL);
-        if (theme_name) {
-            std::string theme(theme_name);
-            g_free(theme_name);
-            if (theme.find("dark") != std::string::npos || theme.find("Dark") != std::string::npos) {
-                return true;
-            }
-        }
-        
-        const char* theme_env = getenv("GTK_THEME");
-        if (theme_env && (strstr(theme_env, "dark") || strstr(theme_env, "Dark"))) {
-            return true;
-        }
-        return false;
+        g_object_set(settings, "gtk-application-prefer-dark-theme", TRUE, NULL);
     }
     
-    const char* get_dark_theme_css() {
-        return 
-            "window { "
-            "  background-color: #1e1e2e; "
-            "  color: #cdd6f4; "
-            "  font-family: 'JetBrains Mono', 'Fira Code', monospace; "
-            "}"
-            
-            "headerbar { "
-            "  background: linear-gradient(135deg, #1e1e2e 0%, #313244 100%); "
-            "  color: #cdd6f4; "
-            "  border-bottom: 2px solid #1793d1; "
-            "  box-shadow: 0 2px 10px rgba(23, 147, 209, 0.3); "
-            "}"
-            
-            "headerbar button { "
-            "  background: linear-gradient(135deg, #313244 0%, #45475a 100%); "
-            "  color: #cdd6f4; "
-            "  border: 1px solid #1793d1; "
-            "  border-radius: 6px; "
-            "  margin: 2px; "
-            "  font-weight: 600; "
-            "}"
-            
-            "button.suggested-action { "
-            "  background: linear-gradient(135deg, #1793d1 0%, #74c7ec 100%); "
-            "  color: #1e1e2e; "
-            "  border: 1px solid #1793d1; "
-            "  font-weight: bold; "
-            "}"
-            
-            "button.suggested-action:hover { "
-            "  background: linear-gradient(135deg, #74c7ec 0%, #89dceb 100%); "
-            "  box-shadow: 0 0 15px rgba(23, 147, 209, 0.5); "
-            "}"
-            
-            "button.destructive-action { "
-            "  background: linear-gradient(135deg, #f38ba8 0%, #eba0ac 100%); "
-            "  color: #1e1e2e; "
-            "  border: 1px solid #f38ba8; "
-            "}"
-            
-            "frame { "
-            "  background: #313244; "
-            "  border: 2px solid #45475a; "
-            "  border-radius: 8px; "
-            "  margin: 6px; "
-            "}"
-            
-            "frame > label { "
-            "  color: #1793d1; "
-            "  font-weight: bold; "
-            "  font-size: 12px; "
-            "  text-shadow: 0 0 5px rgba(23, 147, 209, 0.3); "
-            "}"
-            
-            "textview { "
-            "  background-color: #181825; "
-            "  color: #cdd6f4; "
-            "  font-family: 'JetBrains Mono', monospace; "
-            "  font-size: 11px; "
-            "  border: 2px solid #45475a; "
-            "  border-radius: 6px; "
-            "  selection-background-color: #1793d1; "
-            "}"
-            
-            "button { "
-            "  background: linear-gradient(135deg, #313244 0%, #45475a 100%); "
-            "  color: #cdd6f4; "
-            "  border: 1px solid #585b70; "
-            "  border-radius: 6px; "
-            "  padding: 6px 12px; "
-            "  font-weight: 500; "
-            "}"
-            
-            "button:hover { "
-            "  background: linear-gradient(135deg, #45475a 0%, #585b70 100%); "
-            "  border-color: #1793d1; "
-            "  box-shadow: 0 0 8px rgba(23, 147, 209, 0.3); "
-            "}"
-            
-            "entry { "
-            "  background-color: #313244; "
-            "  color: #cdd6f4; "
-            "  border: 2px solid #45475a; "
-            "  border-radius: 6px; "
-            "  padding: 6px 10px; "
-            "  font-size: 11px; "
-            "}"
-            
-            "entry:focus { "
-            "  border-color: #1793d1; "
-            "  box-shadow: 0 0 8px rgba(23, 147, 209, 0.4); "
-            "}"
-            
-            "progressbar { "
-            "  background-color: #45475a; "
-            "  border-radius: 8px; "
-            "  min-height: 12px; "
-            "}"
-            
-            "progressbar progress { "
-            "  background: linear-gradient(90deg, #1793d1 0%, #74c7ec 100%); "
-            "  border-radius: 8px; "
-            "  box-shadow: 0 0 10px rgba(23, 147, 209, 0.5); "
-            "}"
-            
-            "separator { "
-            "  background-color: #45475a; "
-            "  min-height: 2px; "
-            "}"
-            
-            "label { "
-            "  color: #cdd6f4; "
-            "}"
-            
-            "label.dim-label { "
-            "  color: #9399b2; "
-            "  font-size: 10px; "
-            "}"
-            
-            "scrollbar { "
-            "  background-color: #313244; "
-            "  border-radius: 6px; "
-            "}"
-            
-            "scrollbar slider { "
-            "  background-color: #585b70; "
-            "  border-radius: 6px; "
-            "  min-width: 8px; "
-            "}"
-            
-            "scrollbar slider:hover { "
-            "  background-color: #1793d1; "
-            "}"
-            
-            "combobox button { "
-            "  background: #313244; "
-            "  color: #cdd6f4; "
-            "  border: 1px solid #45475a; "
-            "  border-radius: 6px; "
-            "}"
-            
-            "checkbutton { "
-            "  color: #cdd6f4; "
-            "}"
-            
-            "checkbutton:checked { "
-            "  color: #1793d1; "
-            "}";
-    }
-    
-    const char* get_light_theme_css() {
-        return
-            "@define-color primary_color #2563eb;"
-            "@define-color bg_white #ffffff;"
-            "@define-color bg_light #f8fafc;"
-            "@define-color text_dark #0f172a;"
-            "window { background-color: @bg_white; color: @text_dark; }"
-            "headerbar { background: @bg_light; color: @text_dark; }"
-            "textview { background-color: @bg_white; color: @text_dark; }"
-            "button { background: @bg_light; color: @text_dark; }"
-            "entry { background-color: @bg_white; color: @text_dark; }"
-            "label { color: @text_dark; }";
-    }
+
 
     void run() {
         gtk_main();

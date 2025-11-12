@@ -1,17 +1,10 @@
 # Binaries
 archlog
 archlog-gui
+
+# Build artifacts
 *.o
 *.so
 
-# Build files
-build/
-CMakeCache.txt
-CMakeFiles/
-
 # IDE
 .vscode/
-*.swp
-
-# OS
-.DS_Store
