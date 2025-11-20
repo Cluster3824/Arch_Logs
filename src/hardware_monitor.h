@@ -6,6 +6,14 @@
 #include <fstream>
 #include <sstream>
 #include <cstdio>
+#include <utility>
+#include <iostream>
+#include <memory>
+#include <algorithm>
+#include <limits>
+#include <unistd.h>
+#include <sys/stat.h>
+#include "error_handler.h"
 
 struct HardwareStats {
     double cpu_usage = 0.0;
@@ -44,97 +52,148 @@ public:
 
 private:
     static double get_gpu_usage() {
-        // Try nvidia-smi first
-        FILE* pipe = popen("nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null", "r");
-        if (pipe) {
-            char buffer[64];
-            if (fgets(buffer, sizeof(buffer), pipe)) {
-                pclose(pipe);
-                try {
-                    return std::stod(std::string(buffer));
-                } catch (...) {}
+        try {
+            // Try reading AMD GPU usage directly (more secure)
+            std::ifstream amd_gpu("/sys/class/drm/card0/device/gpu_busy_percent");
+            if (amd_gpu.is_open()) {
+                std::string usage_str;
+                if (std::getline(amd_gpu, usage_str) && !usage_str.empty()) {
+                    return std::clamp(std::stod(usage_str), 0.0, 100.0);
+                }
             }
-            pclose(pipe);
-        }
-        
-        // Try AMD GPU monitoring
-        pipe = popen("cat /sys/class/drm/card0/device/gpu_busy_percent 2>/dev/null", "r");
-        if (pipe) {
-            char buffer[64];
-            if (fgets(buffer, sizeof(buffer), pipe)) {
-                pclose(pipe);
-                try {
-                    return std::stod(std::string(buffer));
-                } catch (...) {}
+            
+            // Fallback to nvidia-smi with input validation
+            std::unique_ptr<FILE, decltype(&pclose)> pipe(
+                popen("timeout 5 nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null", "r"), pclose);
+            if (pipe) {
+                char buffer[32];
+                if (fgets(buffer, sizeof(buffer), pipe.get())) {
+                    buffer[31] = '\0'; // Ensure null termination
+                    double usage = std::stod(std::string(buffer));
+                    return std::clamp(usage, 0.0, 100.0);
+                }
             }
-            pclose(pipe);
+        } catch (const std::exception& e) {
+            ErrorHandler::log_error("GPU usage detection failed: " + std::string(e.what()), ErrorLevel::WARNING);
         }
-        
         return 0.0;
     }
     
     static std::string get_system_load() {
-        std::ifstream loadavg("/proc/loadavg");
-        if (!loadavg.is_open()) return "0.0";
-        std::string load;
-        loadavg >> load;
-        return load;
+        try {
+            std::ifstream loadavg("/proc/loadavg");
+            if (!loadavg.is_open()) {
+                ErrorHandler::handle_file_error("/proc/loadavg", "read");
+                return "0.0";
+            }
+            std::string load;
+            loadavg >> load;
+            return load;
+        } catch (const std::exception& e) {
+            ErrorHandler::log_error("System load detection failed: " + std::string(e.what()), ErrorLevel::WARNING);
+            return "0.0";
+        }
     }
     
     static int get_active_connections() {
-        FILE* pipe = popen("ss -tuln | grep LISTEN | wc -l 2>/dev/null", "r");
-        if (!pipe) return 0;
-        char buffer[32];
-        int count = 0;
-        if (fgets(buffer, sizeof(buffer), pipe)) {
-            count = std::stoi(std::string(buffer));
+        try {
+            // More secure: read /proc/net/tcp directly
+            std::ifstream tcp_file("/proc/net/tcp");
+            if (!tcp_file.is_open()) return 0;
+            
+            int count = 0;
+            std::string line;
+            std::getline(tcp_file, line); // Skip header
+            
+            while (std::getline(tcp_file, line) && count < 10000) { // Prevent infinite loop
+                if (line.find(" 0A ") != std::string::npos) { // LISTEN state
+                    count++;
+                }
+            }
+            return count;
+        } catch (const std::exception& e) {
+            ErrorHandler::log_error("Connection count failed: " + std::string(e.what()), ErrorLevel::WARNING);
+            return 0;
         }
-        pclose(pipe);
-        return count;
     }
     static double get_cpu_usage() {
-        FILE* pipe = popen("top -bn1 | grep 'Cpu(s)' | awk '{print $2}' | cut -d'%' -f1", "r");
-        if (!pipe) return 0.0;
-        char buffer[64];
-        double usage = 0.0;
-        if (fgets(buffer, sizeof(buffer), pipe)) {
-            usage = std::stod(std::string(buffer));
+        try {
+            // More efficient /proc/stat parsing
+            std::ifstream stat_file("/proc/stat");
+            if (!stat_file.is_open()) {
+                ErrorHandler::handle_file_error("/proc/stat", "read");
+                return 0.0;
+            }
+            
+            std::string line;
+            if (std::getline(stat_file, line) && line.substr(0, 3) == "cpu") {
+                std::istringstream iss(line);
+                std::string cpu;
+                long user, nice, system, idle, iowait, irq, softirq;
+                iss >> cpu >> user >> nice >> system >> idle >> iowait >> irq >> softirq;
+                
+                long total = user + nice + system + idle + iowait + irq + softirq;
+                long active = total - idle - iowait;
+                
+                static long prev_total = 0, prev_active = 0;
+                if (prev_total > 0) {
+                    double usage = 100.0 * (active - prev_active) / (total - prev_total);
+                    prev_total = total;
+                    prev_active = active;
+                    return std::clamp(usage, 0.0, 100.0);
+                }
+                prev_total = total;
+                prev_active = active;
+            }
+        } catch (const std::exception& e) {
+            ErrorHandler::log_error("CPU usage detection failed: " + std::string(e.what()), ErrorLevel::WARNING);
         }
-        pclose(pipe);
-        return usage;
+        return 0.0;
     }
 
     static double get_memory_usage() {
-        std::ifstream meminfo("/proc/meminfo");
-        if (!meminfo.is_open()) return 0.0;
-        
-        long total = 0, available = 0;
-        std::string line;
-        while (std::getline(meminfo, line)) {
-            if (line.find("MemTotal:") == 0) {
-                std::istringstream iss(line);
-                std::string key, kb;
-                iss >> key >> total >> kb;
-            } else if (line.find("MemAvailable:") == 0) {
-                std::istringstream iss(line);
-                std::string key, kb;
-                iss >> key >> available >> kb;
-                break;
+        try {
+            std::ifstream meminfo("/proc/meminfo");
+            if (!meminfo.is_open()) {
+                ErrorHandler::handle_file_error("/proc/meminfo", "read");
+                return 0.0;
             }
+            
+            long total = 0, available = 0;
+            std::string line;
+            while (std::getline(meminfo, line)) {
+                if (line.find("MemTotal:") == 0) {
+                    std::istringstream iss(line);
+                    std::string key, kb;
+                    iss >> key >> total >> kb;
+                } else if (line.find("MemAvailable:") == 0) {
+                    std::istringstream iss(line);
+                    std::string key, kb;
+                    iss >> key >> available >> kb;
+                    break;
+                }
+            }
+            return total > 0 ? ((total - available) * 100.0 / total) : 0.0;
+        } catch (const std::exception& e) {
+            ErrorHandler::log_error("Memory usage detection failed: " + std::string(e.what()), ErrorLevel::WARNING);
+            return 0.0;
         }
-        return total > 0 ? ((total - available) * 100.0 / total) : 0.0;
     }
 
     static double get_disk_usage() {
-        FILE* pipe = popen("df / | tail -1 | awk '{print $5}' | cut -d'%' -f1", "r");
-        if (!pipe) return 0.0;
-        char buffer[64];
-        double usage = 0.0;
-        if (fgets(buffer, sizeof(buffer), pipe)) {
-            usage = std::stod(std::string(buffer));
+        try {
+            // Use statvfs for better performance and security
+            struct statvfs stat;
+            if (statvfs("/", &stat) == 0) {
+                double total = static_cast<double>(stat.f_blocks) * stat.f_frsize;
+                double free = static_cast<double>(stat.f_bavail) * stat.f_frsize;
+                double used = total - free;
+                return std::clamp((used / total) * 100.0, 0.0, 100.0);
+            }
+        } catch (const std::exception& e) {
+            ErrorHandler::log_error("Disk usage detection failed: " + std::string(e.what()), ErrorLevel::WARNING);
         }
-        pclose(pipe);
-        return usage;
+        return 0.0;
     }
 
     static int get_cpu_temperature() {
@@ -146,32 +205,39 @@ private:
     }
 
     static int get_gpu_temperature() {
-        // Try nvidia-smi first
-        FILE* pipe = popen("nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits 2>/dev/null", "r");
-        if (pipe) {
-            char buffer[64];
-            if (fgets(buffer, sizeof(buffer), pipe)) {
-                pclose(pipe);
-                try {
-                    return std::stoi(std::string(buffer));
-                } catch (...) {}
+        try {
+            // Try AMD GPU temperature files directly
+            for (int i = 0; i < 10; i++) {
+                std::string path = "/sys/class/drm/card" + std::to_string(i) + "/device/hwmon";
+                std::ifstream hwmon_dir(path);
+                if (hwmon_dir.good()) {
+                    for (int j = 0; j < 10; j++) {
+                        std::string temp_path = path + "/hwmon" + std::to_string(j) + "/temp1_input";
+                        std::ifstream temp_file(temp_path);
+                        if (temp_file.is_open()) {
+                            int temp_millidegree;
+                            if (temp_file >> temp_millidegree) {
+                                return std::clamp(temp_millidegree / 1000, 0, 150);
+                            }
+                        }
+                    }
+                }
             }
-            pclose(pipe);
-        }
-        
-        // Try AMD GPU temperature
-        pipe = popen("cat /sys/class/drm/card0/device/hwmon/hwmon*/temp1_input 2>/dev/null | head -1", "r");
-        if (pipe) {
-            char buffer[64];
-            if (fgets(buffer, sizeof(buffer), pipe)) {
-                pclose(pipe);
-                try {
-                    return std::stoi(std::string(buffer)) / 1000;
-                } catch (...) {}
+            
+            // Fallback to nvidia-smi with timeout
+            std::unique_ptr<FILE, decltype(&pclose)> pipe(
+                popen("timeout 3 nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits 2>/dev/null", "r"), pclose);
+            if (pipe) {
+                char buffer[16];
+                if (fgets(buffer, sizeof(buffer), pipe.get())) {
+                    buffer[15] = '\0';
+                    int temp = std::stoi(std::string(buffer));
+                    return std::clamp(temp, 0, 150);
+                }
             }
-            pclose(pipe);
+        } catch (const std::exception& e) {
+            ErrorHandler::log_error("GPU temperature detection failed: " + std::string(e.what()), ErrorLevel::WARNING);
         }
-        
         return 0;
     }
 

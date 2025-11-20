@@ -8,6 +8,9 @@
 #include <iomanip>
 #include <sstream>
 #include <fstream>
+#include <iostream>
+#include <cstdlib>
+#include <ctime>
 
 enum class LogLevel {
     TRACE = 0,

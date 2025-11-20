@@ -5,6 +5,7 @@
 #include <vector>
 #include <cstdio>
 #include <fstream>
+#include <cstdlib>
 
 class ArchFeatures {
 public:

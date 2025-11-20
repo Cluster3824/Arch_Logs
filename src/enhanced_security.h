@@ -5,6 +5,10 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <pwd.h>
+#include <cctype>
+#include <cstdlib>
+#include <cstdio>
+#include <ctime>
 
 class EnhancedSecurity {
 public:
